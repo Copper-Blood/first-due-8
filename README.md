@@ -1,0 +1,1 @@
+# First Due 8\n\nStation 8 territory trainer. Open it from the setup link; the district data is encrypted and needs the key in that link.\n
