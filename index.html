@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="fd8-pwa" content="1792707560"><meta name="robots" content="noindex"><meta name="theme-color" content="#0C6A44">
+<meta name="fd8-pwa" content="1792708419"><meta name="robots" content="noindex"><meta name="theme-color" content="#0C6A44">
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px/1.4 system-ui,-apple-system,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>First Due 8</title>
@@ -476,13 +476,32 @@ function listen(onAlts,onFail){
 const SUFX=/\b(avenue|ave|street|st|road|rd|drive|dr|place|pl|court|ct|circle|cir|lane|ln|boulevard|blvd|way|terrace|ter|parkway|pkwy)\b/g;
 const squash=t=>t.toLowerCase().replace(/[^a-z0-9]/g,'');
 function coreName(n){return n.toLowerCase().replace(/^(w|n|s|e|west|north|south|east)\s+(?=\S+\s)/,'').replace(SUFX,'').replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim()}
-function saysName(t,n){const c=squash(coreName(n));return c.length>=3&&squash(t).includes(c)}
-function matchOption(alts,opts){
-  for(const t of alts){const hits=opts.filter(([k,names])=>names.every(n=>saysName(t,n)));if(hits.length===1)return hits[0][0]}
-  return null}
+const STOPW=new Set(['out','of','the','onto','on','to','turn','and','then','a','an','go','take','it','is','i','ave','avenue','st','street','rd','road','dr','drive','pl','place','ct','court','cir','circle','ln','lane','blvd','boulevard','way','ter','terrace','w','n','s','e','bay','block','between','hundred']);
+const NUMW={one:1,won:1,two:2,to:2,too:2,three:3,tree:3,four:4,for:4,fore:4,'1':1,'2':2,'3':3,'4':4};
+const SOUND={write:'right',rite:'right',wright:'right',ride:'right',word:'ward',words:'ward',warde:'ward',wards:'ward',award:'ward',prospects:'prospect',strait:'straight',straights:'straight',curtsy:'courtesy',curtesy:'courtesy',courtsey:'courtesy',stays:'stay',tryin:'tryon',trion:'tryon'};
+function words(t){return t.toLowerCase().replace(/[^a-z0-9 ]/g,' ').split(/\s+/).filter(Boolean).map(w=>SOUND[w]||w)}
+function toks(t){return words(t).filter(w=>!STOPW.has(w))}
+function lev(a,b){if(a===b)return 0;const m=a.length,n=b.length;if(!m||!n)return m||n;let p=Array.from({length:n+1},(_,j)=>j);for(let i=1;i<=m;i++){const c=[i];for(let j=1;j<=n;j++)c[j]=Math.min(p[j]+1,c[j-1]+1,p[j-1]+(a[i-1]===b[j-1]?0:1));p=c}return p[n]}
+function wsim(a,b){if(a===b)return 1;if(a.length<3||b.length<3)return 0;const L=Math.max(a.length,b.length);let r=1-lev(a,b)/L;if(a[0]===b[0])r+=0.08;return Math.min(1,r)}
+// how well the transcript covers a set of key words (0..1); handles split/joined words (ann moore / annmoore)
+function coverage(t,keys){if(!keys.length)return 0;const tw=words(t);const sq=squash(t);let got=0;for(const k of keys){if(k.length>=4&&sq.includes(k)){got+=1;continue}let best=0;for(const w of tw)best=Math.max(best,wsim(k,w));for(let x=0;x+1<tw.length;x++)best=Math.max(best,wsim(k,tw[x]+tw[x+1]));got+=best>=0.72?best:0}return got/keys.length}
+// opts: [[key,[label words...]]]. Scores only on words that tell the options apart, so "right out of the bed" still picks "Right out of the bay".
+function pickOption(alts,opts){
+  const sets=opts.map(([k,ws])=>[k,[...new Set(ws.flatMap(w=>toks(w)))]]);
+  const cnt={};sets.forEach(([,ws])=>ws.forEach(w=>cnt[w]=(cnt[w]||0)+1));
+  const dist=sets.map(([k,ws])=>[k,ws.filter(w=>cnt[w]===1).length?ws.filter(w=>cnt[w]===1):ws]);
+  let best=null,bs=0,second=0;
+  for(const t of alts){
+    const tw=words(t);if(tw.length&&tw.length<=2){const n=NUMW[tw[tw.length-1]];if(n&&n<=opts.length&&!tw.some(w=>!NUMW[w]&&w!=='number'&&w!=='option'))return opts[n-1][0]}
+    const sc=dist.map(([k,ks])=>[k,coverage(t,ks)]).sort((a,b)=>b[1]-a[1]);
+    if(sc[0][1]>bs){bs=sc[0][1];best=sc[0][0];second=sc[1]?sc[1][1]:0}
+  }
+  return bs>=0.5&&bs-second>=0.2?best:null}
+function matchOption(alts,opts){return pickOption(alts,opts)}
+function saysName(t,n){const ks=toks(coreName(n));return ks.length>0&&coverage(t,ks)>=0.8}
 function matchWhich(alts){
   const ids=Object.keys(SEC);
-  for(const t0 of alts){const t=' '+t0.replace(/[^a-z ]/g,' ')+' ';const sc={};
+  for(const t0 of alts){const t=' '+words(t0).join(' ')+' ';const sc={};
     for(const id of ids){const x=SEC[id];let v=0;const other=id.endsWith(':other');
       if(!other){if(saysName(t,x.name))v+=5}else{if(/ other /.test(t))v+=2;if(x.road==='CR'&&/ stay /.test(t))v+=3}
       const rw={WW:/ (west|ward right|right on ward|right onto ward|right ward) /,WE:/ (east|ward left|left on ward|left onto ward|left ward) /,PS:/ (prospect|stay|south) /,CR:/ (courtesy|straight) /}[x.road];
@@ -624,7 +643,17 @@ function drillWhich(it,s,stage){
     const fb=document.createElement('div');fb.className='fb';fb.innerHTML=verdictHtml(ok,ms,S.tgt,`${said&&!ok?`<div class="muted">You said ${esc(SEC[said].name)} (${esc(SEC[said].fam)}).</div>`:''}${pathHtml(sec)}${p.r!=null?`<details ${ok?'':'open'}><summary class="muted" style="cursor:pointer">Turn by turn</summary>${turnsHtml(p.r)}</details>`:''}`);stage.appendChild(fb);nextBtn(fb);
   }
   renderStep();
-  const go=()=>{ready=true;startTimer(S.tgt);listenFor(stage,alts=>{const id=matchWhich(alts);if(!id)return false;if(!done){if(id===sec)finish(true);else finish(false,null,id)}return true},()=>done)};
+  const stepOpts=()=>{
+    if(step===0)return [['L',['straight','courtesy']],['R',['right']]];
+    if(step===1)return Object.entries(ROADS).filter(([k,r])=>r.exit===chosen[0]).map(([k])=>[k,{WW:['ward','right','west'],WE:['ward','left','east'],PS:['prospect','stay','south'],CR:['courtesy']}[k]]);
+    return Object.entries(SEC).filter(([k,x])=>x.road===chosen[1]).map(([k,x])=>[k,k.endsWith(':other')?[x.name,'other']:[coreName(x.name)]]);
+  };
+  const onVoice=alts=>{if(done)return true;
+    const full=matchWhich(alts);
+    if(full){if(full===sec)finish(true);else finish(false,null,full);return true}
+    const k=pickOption(alts,stepOpts());if(!k)return false;
+    choose(k);if(!done)setTimeout(()=>listenFor(stage,onVoice,()=>done),120);return true};
+  const go=()=>{ready=true;startTimer(S.tgt);listenFor(stage,onVoice,()=>done)};
   if(canSpeak&&state.settings.audio){ready=false;speak(speakable(p.a),go)}else go();
   const rp=$('#replay',stage);if(rp)rp.onclick=()=>speak(speakable(p.a));
   keyHandler=e=>{if(done)return;const n=+e.key;if(n>=1&&n<=4){const b=$$('.opt',opts)[n-1];if(b)b.click()}};
