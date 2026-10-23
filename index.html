@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="fd8-pwa" content="1792708419"><meta name="robots" content="noindex"><meta name="theme-color" content="#0C6A44">
+<meta name="fd8-pwa" content="1792728111"><meta name="robots" content="noindex"><meta name="theme-color" content="#0C6A44">
 <link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="icon-192.png">
 <style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px/1.4 system-ui,-apple-system,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
 <title>First Due 8</title>
@@ -154,7 +154,7 @@ svg .tgtpt{fill:var(--accent);stroke:var(--surface);stroke-width:2;vector-effect
 .prompt{padding:14px max(16px,env(safe-area-inset-right,0px)) 8px max(16px,env(safe-area-inset-left,0px))}
 .prompt .kind{font-size:11.5px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted);font-weight:700}
 .prompt .addr{font-family:var(--f-display);font-weight:800;font-size:30px;line-height:1.1;margin-top:4px;text-wrap:balance}
-.prompt .addr.radio{color:transparent;text-shadow:0 0 14px var(--muted)}
+.prompt .addr.radio,.prompt .sub.radio{color:transparent!important;text-shadow:0 0 14px var(--muted)}
 .prompt .sub{color:var(--muted);margin-top:4px;font-size:14px}
 .answers{padding:8px max(16px,env(safe-area-inset-right,0px)) 16px max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:8px}
 .answers .crumbs{font-family:var(--f-mono);font-size:12.5px;color:var(--muted);min-height:18px}
@@ -314,9 +314,9 @@ function labelSpot(s){let best=null,bl=-1;for(const pt of s.pp){let L=0;for(let 
 D.streets.forEach(s=>s.lab=labelSpot(s));
 /* ---------- state + persistence ---------- */
 const LSKEY='fd8-state-v1';
-function blankState(){return {v:1,updated:0,items:{},days:{},log:[],settings:{audio:true,radio:false,voice:false,unlocked:1,labelsMap:true,sectorsMap:true,callsMap:false,covMap:false},cov:{},driven:{},seenIntro:false}}
+function blankState(){return {v:1,updated:0,items:{},days:{},log:[],settings:{audio:true,radio:false,voice:false,voiceURI:'',rate:1,pitch:1,digits:false,runMax:2,unlocked:1,labelsMap:true,sectorsMap:true,callsMap:false,covMap:false},cov:{},driven:{},runs:[],seenIntro:false}}
 let state=blankState();
-const fixState=()=>{state.cov=state.cov||{};state.driven=state.driven||{}};
+const fixState=()=>{state.cov=state.cov||{};state.driven=state.driven||{};state.runs=state.runs||[]};
 try{const raw=localStorage.getItem(LSKEY); if(raw){const s=JSON.parse(raw); if(s&&s.v===1) state=Object.assign(blankState(),s,{settings:Object.assign(blankState().settings,s.settings||{})})}}catch(e){}
 let dbDoc=null, syncMsg='Saved on this device', dbTimer=null;
 function save(){state.updated=Date.now();try{localStorage.setItem(LSKEY,JSON.stringify(state))}catch(e){} if(dbDoc){clearTimeout(dbTimer);dbTimer=setTimeout(flushDb,2500)}}
@@ -459,8 +459,17 @@ const SPEAK={Dr:'Drive',Ave:'Avenue',St:'Street',Rd:'Road',Cir:'Circle',Ct:'Cour
 function speakNum(n){n=+n;if(n<100)return String(n);const a=Math.floor(n/100),b=n%100;if(b===0)return `${a} hundred`;return `${a} ${b<10?'oh '+b:b}`}
 function speakable(a){const w=a.split(' ');return w.map((x,i)=>i===0&&/^\d+$/.test(x)?speakNum(x):(SPEAK[x]||x)).join(' ')}
 const canSpeak='speechSynthesis' in window;
+function pickVoice(){if(!canSpeak)return null;const id=state.settings.voiceURI;if(!id)return null;return speechSynthesis.getVoices().find(v=>v.voiceURI===id)||null}
 function speak(text,onend){if(!canSpeak||!state.settings.audio){onend&&onend();return}
-  try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.rate=1.02;u.pitch=0.95;let done=false;const fin=()=>{if(!done){done=true;onend&&onend()}};u.onend=fin;u.onerror=fin;setTimeout(fin,6000);speechSynthesis.speak(u)}catch(e){onend&&onend()}}
+  try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text);u.rate=state.settings.rate||1;u.pitch=state.settings.pitch||1;const v=pickVoice();if(v){u.voice=v;u.lang=v.lang}else u.lang='en-US';
+    let done=false;const fin=()=>{if(!done){done=true;onend&&onend()}};u.onend=fin;u.onerror=fin;setTimeout(fin,3000+text.length*110/(u.rate||1));speechSynthesis.speak(u)}catch(e){onend&&onend()}}
+function shortName(n){return coreName(n).split(' ').map(w=>w?w[0].toUpperCase()+w.slice(1):w).join(' ')}
+function crossFor(s,p){if(!p)return null;if(p.ca&&p.cb&&p.ca!==p.cb)return [p.ca,p.cb];let b=null,bd=1e18;s.pts.forEach(q=>{if(q.ca&&q.cb&&q.ca!==q.cb){const dd=(q.x-p.x)**2+(q.y-p.y)**2;if(dd<bd){bd=dd;b=q}}});return b&&bd<250*250?[b.ca,b.cb]:null}
+function speakNumD(n){return state.settings.digits?String(n).split('').join(' '):speakNum(n)}
+function dispatchText(p,s){const st=s.n.split(' ').map(x=>SPEAK[x]||x).join(' ');const cx=crossFor(s,p);return (p&&p.n?speakNumD(p.n)+' ':'')+st+(cx?`, cross streets of ${shortName(cx[0])} and ${shortName(cx[1])}`:'')}
+// reads it, pauses a second, reads it again (like dispatch); onFirst after the first read, onDone after the second
+function dispatchSpeak(text,onFirst,onDone,isDone){if(!canSpeak||!state.settings.audio){onFirst&&onFirst();onDone&&onDone();return}
+  speak(text,()=>{if(isDone&&isDone())return;onFirst&&onFirst();setTimeout(()=>{if(isDone&&isDone())return;speak(text,()=>{if(!(isDone&&isDone()))onDone&&onDone()})},1000)})}
 /* ---------- voice answers ---------- */
 const SRC=window.SpeechRecognition||window.webkitSpeechRecognition;
 const canListen=!!SRC&&PWA;
@@ -544,6 +553,11 @@ function renderTrain(){
    <div class="card"><div class="row"><h3 style="margin:0">Settings</h3></div>
     <div class="toggle"><div><b>Read addresses aloud</b><div class="muted" style="font-size:13px">Dispatch-style voice before each Which way drill${canSpeak?'':' (not supported in this browser)'}</div></div><input type="checkbox" id="setAudio" ${state.settings.audio?'checked':''} ${canSpeak?'':'disabled'}></div>
     <div class="toggle"><div><b>Radio mode</b><div class="muted" style="font-size:13px">Hide the written address so you work from the voice alone</div></div><input type="checkbox" id="setRadio" ${state.settings.radio?'checked':''} ${canSpeak?'':'disabled'}></div>
+    ${canSpeak?`<div style="padding:10px 0;border-bottom:1px solid var(--line)" class="stack"><div><b>Dispatch voice</b><div class="muted" style="font-size:13px">Uses the voices installed on this phone</div></div>
+      <label class="f">Voice<select id="setVoiceSel"><option value="">Phone default</option></select></label>
+      <div class="row wrap" style="gap:12px"><label class="f" style="flex:1;min-width:130px">Speed <input type="range" id="setRate" min="0.7" max="1.4" step="0.05" value="${state.settings.rate||1}"></label><label class="f" style="flex:1;min-width:130px">Pitch <input type="range" id="setPitch" min="0.6" max="1.4" step="0.05" value="${state.settings.pitch||1}"></label></div>
+      <label class="check"><input type="checkbox" id="setDigits" ${state.settings.digits?'checked':''}>Read house numbers digit by digit (“nine three two”)</label>
+      <div><button class="btn ghost" id="testVoice" type="button">Test the voice</button></div></div>`:''}
     ${canListen?`<div class="toggle"><div><b>Answer by voice</b><div class="muted" style="font-size:13px">Say the branch (\u201cW English\u201d, \u201cTryon\u201d), the street name, or both cross streets. Taps still work.</div></div><input type="checkbox" id="setVoice" ${state.settings.voice?'checked':''}></div>`:(PWA?`<p class="muted" style="font-size:13px;margin:10px 0 0">Voice answers need Chrome. This browser can't do speech recognition.</p>`:'')}
    </div>
    <div class="card"><p class="eyebrow">Where you are</p>${ts.map(x=>`<div class="tier" style="margin-bottom:12px"><div><b>${x.t.name}</b> ${x.t.id>state.settings.unlocked?'<span class="muted">· locked</span>':''}<div class="muted" style="font-size:13px">${x.t.desc}</div></div><div class="mono" style="font-size:13px">${Math.round(100*x.mast/x.n)}%</div><div class="bar"><i class="m" style="width:${100*x.mast/x.n}%"></i><i class="s" style="width:${100*(x.solid-x.mast)/x.n}%"></i><i class="n" style="width:${100*(x.intro-x.solid)/x.n}%"></i></div></div>`).join('')}
@@ -556,6 +570,13 @@ function renderTrain(){
   $('#setAudio',v).onchange=e=>{state.settings.audio=e.target.checked;if(!e.target.checked)state.settings.radio=false;save();renderTrain()};
   $('#setRadio',v).onchange=e=>{state.settings.radio=e.target.checked;if(e.target.checked)state.settings.audio=true;save();renderTrain()};
   const sv=$('#setVoice',v);if(sv)sv.onchange=e=>{state.settings.voice=e.target.checked;save();renderTrain()};
+  const vsel=$('#setVoiceSel',v);
+  if(vsel){const fill=()=>{const vs=speechSynthesis.getVoices().filter(x=>/^en/i.test(x.lang));vsel.innerHTML='<option value="">Phone default</option>'+vs.map(x=>`<option value="${esc(x.voiceURI)}">${esc(x.name)} (${esc(x.lang)})</option>`).join('');vsel.value=state.settings.voiceURI||''};fill();speechSynthesis.onvoiceschanged=fill;
+    vsel.onchange=e=>{state.settings.voiceURI=e.target.value;save()};
+    $('#setRate',v).onchange=e=>{state.settings.rate=+e.target.value;save()};
+    $('#setPitch',v).onchange=e=>{state.settings.pitch=+e.target.value;save()};
+    $('#setDigits',v).onchange=e=>{state.settings.digits=e.target.checked;save()};
+    $('#testVoice',v).onclick=()=>{const st=ST['SOUTH RD']||D.streets[0];const p=st.pts.filter(q=>q.n).sort((a,b)=>Math.abs(a.n-932)-Math.abs(b.n-932))[0];const old=state.settings.audio;state.settings.audio=true;dispatchSpeak(dispatchText(p,st));state.settings.audio=old}}
 }
 /* ---------- Drill engine ---------- */
 let S=null; // session
@@ -610,8 +631,8 @@ function showIntro(it,s,stage,streetLevel){
 /* Which way */
 function drillWhich(it,s,stage){
   const p=pickPoint(s,it)||{a:s.n,sec:it.sec,r:null,x:0,y:0};const sec=p.sec||it.sec;const want=SEC[sec];
-  const radio=state.settings.radio&&state.settings.audio&&canSpeak;
-  stage.innerHTML=`<div class="prompt"><div class="kind">Which way · dispatch</div><div class="addr ${radio?'radio':''}" id="addr">${esc(p.a)}</div><div class="sub">${radio?'Listen, then pick the way out':'Pick the way out, as fast as you can'} ${canSpeak&&state.settings.audio?'<button class="chip" id="replay" style="margin-left:6px;padding:3px 10px">Replay</button>':''}</div></div><div class="answers" id="ans"><div class="crumbs" id="crumbs"></div><div id="opts" class="stack" style="gap:8px"></div></div>`;
+  const radio=state.settings.radio&&state.settings.audio&&canSpeak;const cx=p.n?crossFor(s,p):null;const dtext=dispatchText(p.n?p:null,s);
+  stage.innerHTML=`<div class="prompt"><div class="kind">Which way · dispatch</div><div class="addr ${radio?'radio':''}" id="addr">${esc(p.a)}</div>${cx?`<div class="sub ${radio?'radio':''}" id="xst" style="font-weight:600;color:var(--ink)">Cross streets ${esc(cx[0])} &amp; ${esc(cx[1])}</div>`:''}<div class="sub">${radio?'Listen, then pick the way out':'Pick the way out, as fast as you can'} ${canSpeak&&state.settings.audio?'<button class="chip" id="replay" style="margin-left:6px;padding:3px 10px">Replay</button>':''}</div></div><div class="answers" id="ans"><div class="crumbs" id="crumbs"></div><div id="opts" class="stack" style="gap:8px"></div></div>`;
   const opts=$('#opts',stage), crumbs=$('#crumbs',stage);
   let step=0, chosen=[], ready=false, done=false;
   const steps=[];
@@ -634,7 +655,7 @@ function drillWhich(it,s,stage){
   }
   function finish(ok,wrongK,said){done=true;stopListen();const ms=stopTimer();if(canSpeak)speechSynthesis.cancel();
     if(!ok){const b=$(`.opt[data-k="${wrongK}"]`,opts);if(b)b.classList.add('wrong')}
-    const g=record(it,ok,ms,{});$('#addr',stage).classList.remove('radio');
+    const g=record(it,ok,ms,{});$('#addr',stage).classList.remove('radio');const xe=$('#xst',stage);if(xe)xe.classList.remove('radio');
     $('#ans',stage).remove();
     const m=document.createElement('div');m.className='drillmap';stage.appendChild(m);const map=makeMap(m,{});map.setLabels('auto');map.setSectors(true);map.hl(s.k);
     if(p.r!=null){map.route(p.r);const end=D.routes[p.r].pp.at(-1);if(Math.hypot(end[0]-p.x,end[1]-p.y)>30)map.line(end,[p.x,p.y])}
@@ -653,9 +674,10 @@ function drillWhich(it,s,stage){
     if(full){if(full===sec)finish(true);else finish(false,null,full);return true}
     const k=pickOption(alts,stepOpts());if(!k)return false;
     choose(k);if(!done)setTimeout(()=>listenFor(stage,onVoice,()=>done),120);return true};
-  const go=()=>{ready=true;startTimer(S.tgt);listenFor(stage,onVoice,()=>done)};
-  if(canSpeak&&state.settings.audio){ready=false;speak(speakable(p.a),go)}else go();
-  const rp=$('#replay',stage);if(rp)rp.onclick=()=>speak(speakable(p.a));
+  const go=()=>{ready=true;startTimer(S.tgt)};
+  const mic=()=>listenFor(stage,onVoice,()=>done);
+  if(canSpeak&&state.settings.audio){ready=false;dispatchSpeak(dtext,go,mic,()=>done)}else{go();mic()}
+  const rp=$('#replay',stage);if(rp)rp.onclick=()=>speak(dtext);
   keyHandler=e=>{if(done)return;const n=+e.key;if(n>=1&&n<=4){const b=$$('.opt',opts)[n-1];if(b)b.click()}};
 }
 let keyHandler=null;
@@ -827,19 +849,30 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 function fmtDur(ms){const m=Math.floor(ms/60000),h=Math.floor(m/60);return h?`${h}:${String(m%60).padStart(2,'0')}`:`${m}:${String(Math.floor(ms/1000)%60).padStart(2,'0')}`}
 function isDriven(k,h){const s=ST[k];if(!s||!h)return false;return h.length>=3||(h.length>=2&&h.length/s.ch.length>=0.6)||(s.ch.length===1&&h.length===1)}
 function newStreetCount(){return Object.keys(drv.hits).filter(k=>!covOf(k).length&&isDriven(k,drv.hits[k])).length}
-function startDrive(resume){
+function chime(){try{const C=window.AudioContext||window.webkitAudioContext;const ac=new C();[0,0.2].forEach((t,i)=>{const o=ac.createOscillator(),g=ac.createGain();o.frequency.value=i?1046:784;o.connect(g);g.connect(ac.destination);g.gain.setValueAtTime(0.0001,ac.currentTime+t);g.gain.exponentialRampToValueAtTime(0.35,ac.currentTime+t+0.02);g.gain.exponentialRampToValueAtTime(0.0001,ac.currentTime+t+0.35);o.start(ac.currentTime+t);o.stop(ac.currentTime+t+0.4)})}catch(e){}}
+function startDrive(resume,run){
   if(!canGPS)return;
-  if(!resume)drv={active:true,t0:Date.now(),pts:[],dist:0,hits:{},acc:null};
+  if(!resume)drv={active:true,t0:Date.now(),pts:[],dist:0,hits:{},acc:null,run:run||null,still:null,peeked:false};
   drv.active=true;saveDrv();
-  const ov=$('#driveov');ov.hidden=false;
-  ov.innerHTML=`<div class="drivebig"><div class="rec"><span class="dotlive"></span>Recording drive</div>
+  const ov=$('#driveov');ov.hidden=false;const R=drv.run;
+  const label=R?'Arrived':'Stop and review';
+  ov.innerHTML=R?`<div class="drivebig"><div class="rec"><span class="dotlive"></span>Responding</div>
+   <div><div style="font-family:var(--f-display);font-weight:800;font-size:32px;line-height:1.1">${esc(R.a)}</div>${R.cx?`<div class="muted" style="font-size:16px;margin-top:4px">Cross streets ${esc(R.cx[0])} &amp; ${esc(R.cx[1])}</div>`:''}</div>
+   <div class="dstats" style="grid-template-columns:repeat(2,1fr)"><div><b id="dtime">0:00</b><span>time</span></div><div><b id="ddist">0.0</b><span>miles</span></div></div>
+   <p class="muted" id="dgps">Waiting for GPS…</p>
+   <p class="muted">Drive normally and obey traffic laws. The app chimes when you arrive.</p>
+   <button class="btn ghost" id="dpeek" hidden>Show me the route</button><div id="dpeekbox"></div>
+   <button class="btn big" id="dstop">${label}</button><button class="btn ghost" id="dcancel">Cancel this call</button></div>`
+  :`<div class="drivebig"><div class="rec"><span class="dotlive"></span>Recording drive</div>
    <div class="dstats"><div><b id="dtime">0:00</b><span>time</span></div><div><b id="ddist">0.0</b><span>miles</span></div><div><b id="dnew">0</b><span>new streets</span></div></div>
    <p class="muted" id="dgps">Waiting for GPS…</p>
    <p class="muted">Keep the phone mounted with the screen on. Nothing to read or tap until you park.</p>
-   <button class="btn big" id="dstop">Stop and review</button></div>`;
-  const upd=()=>{if(!drv)return;$('#dtime').textContent=fmtDur(Date.now()-drv.t0);$('#ddist').textContent=(drv.dist/1609.34).toFixed(1);$('#dnew').textContent=newStreetCount()};
+   <button class="btn big" id="dstop">${label}</button></div>`;
+  const upd=()=>{if(!drv)return;$('#dtime').textContent=fmtDur(Date.now()-drv.t0);$('#ddist').textContent=(drv.dist/1609.34).toFixed(1);const dn=$('#dnew');if(dn)dn.textContent=newStreetCount()};
   clearInterval(drvTick);drvTick=setInterval(upd,1000);upd();
-  $('#dstop').onclick=()=>{if(Date.now()-stopArmed<3500){stopDrive();return}stopArmed=Date.now();$('#dstop').textContent='Tap again to stop';setTimeout(()=>{const b=$('#dstop');if(b)b.textContent='Stop and review'},3500)};
+  $('#dstop').onclick=()=>{if(Date.now()-stopArmed<3500){stopDrive(!!R);return}stopArmed=Date.now();$('#dstop').textContent='Tap again to confirm';setTimeout(()=>{const b=$('#dstop');if(b)b.textContent=label},3500)};
+  const dc=$('#dcancel');if(dc)dc.onclick=()=>{if(drv&&drv.run)drv.run.cancelled=true;stopDrive(false)};
+  const pk=$('#dpeek');if(pk)pk.onclick=()=>{if(!drv||!drv.run)return;drv.peeked=true;saveDrv();$('#dpeekbox').innerHTML=`<div class="card">${turnsHtml(drv.run.r)}</div>`;pk.hidden=true};
   keepAwake();
   gpsWatch=navigator.geolocation.watchPosition(onFix,err=>{const g=$('#dgps');if(!g)return;g.textContent=err.code===1?'Location is blocked. Allow location for this site in the browser settings, then start again.':'GPS signal lost. Still recording; it will pick back up.'},{enableHighAccuracy:true,maximumAge:2000,timeout:20000});
 }
@@ -849,7 +882,10 @@ function onFix(pos){
   const c=pos.coords;const g=$('#dgps');
   if(c.accuracy>40){if(g)g.textContent=`GPS weak (±${Math.round(c.accuracy)} m). Waiting for a better fix.`;return}
   if(g)g.textContent=`GPS good (±${Math.round(c.accuracy)} m)`;
-  const [x,y]=P(c.longitude,c.latitude);const last=drv.pts[drv.pts.length-1];
+  const [x,y]=P(c.longitude,c.latitude);const last=drv.pts[drv.pts.length-1];const now=Date.now();
+  if(drv.run){const step0=last?Math.hypot(x-last[0],y-last[1]):0;const dt=last?(now-last[2])/1000:0;const spd=(c.speed!=null&&!isNaN(c.speed))?c.speed:(dt>0?step0/dt:0);
+    const pk=$('#dpeek');if(spd<1.2){if(!drv.still)drv.still=now;else if(now-drv.still>6000&&pk&&!drv.peeked)pk.hidden=false}else{drv.still=null;if(pk)pk.hidden=true;const bx=$('#dpeekbox');if(bx)bx.innerHTML=''}
+    if(now-drv.t0>20000&&Math.hypot(x-drv.run.x,y-drv.run.y)<=60){chime();stopDrive(true);return}}
   if(last){const step=Math.hypot(x-last[0],y-last[1]);if(step<5)return;if(step<400)drv.dist+=step}
   drv.pts.push([Math.round(x),Math.round(y),Date.now()]);
   // fill gaps so a fast pass still covers each 40 m chunk
@@ -858,7 +894,7 @@ function onFix(pos){
   for(const [px,py] of pts)for(const [k,i] of chunksNear(px,py,22)){const h=drv.hits[k]||(drv.hits[k]=[]);if(!h.includes(i))h.push(i)}
   if(++fixN%4===0)saveDrv();
 }
-function stopDrive(){
+function stopDrive(arrived){
   if(gpsWatch!=null){navigator.geolocation.clearWatch(gpsWatch);gpsWatch=null}
   clearInterval(drvTick);try{wakeLock&&wakeLock.release()}catch(e){}wakeLock=null;
   if(!drv){$('#driveov').hidden=true;return}
@@ -867,9 +903,9 @@ function stopDrive(){
     drove.push(k);if(!had.length)newly.push(k);
     state.cov[k]=[...new Set([...had,...drv.hits[k]])].sort((a,b)=>a-b);}
   drove.forEach(k=>state.driven[k]=Date.now());
-  const summary={t:drv.t0,ms:Date.now()-drv.t0,dist:drv.dist,drove,newly,pts:drv.pts.map(p=>[p[0],p[1]])};
+  const summary={t:drv.t0,ms:Date.now()-drv.t0,dist:drv.dist,drove,newly,pts:drv.pts.map(p=>[p[0],p[1]]),run:drv.run,peeked:drv.peeked,arrived:!!arrived};
   drv=null;try{localStorage.removeItem(DKEY)}catch(e){}
-  save();flushDb();showDriveReview(summary);
+  save();flushDb();if(summary.run&&!summary.run.cancelled)finishRun(summary);else showDriveReview(summary);
 }
 function showDriveReview(sm){
   const ov=$('#driveov');ov.hidden=false;
@@ -888,13 +924,66 @@ function showDriveReview(sm){
   const q=$('#dquiz',ov);if(q)q.onclick=()=>{ov.hidden=true;ov.innerHTML='';if(!startSessionFor(sm.drove)){show('train')}};
   $('#ddone',ov).onclick=()=>{ov.hidden=true;ov.innerHTML='';show('log')};
 }
+function routeLen(p){const r=D.routes[p.r];if(!r)return Math.hypot(p.x,p.y)*1.4;const e=r.pp[r.pp.length-1];return r.m+Math.hypot(e[0]-p.x,e[1]-p.y)}
+function runCandidates(){const max=state.settings.runMax?state.settings.runMax*1609.34:1e9;const recent=new Set((state.runs||[]).slice(-15).map(r=>r.a));const out=[];
+  D.streets.forEach(s=>s.pts.forEach(p=>{if(!p.real||p.r==null||!p.n)return;const len=routeLen(p);if(len>max||len<300||recent.has(p.a))return;out.push({p,s,len,w:Math.sqrt(p.w+0.2)*(1+weakness(s.k))*(covFrac(s)<0.3?1.5:1)})}));return out}
+function pickRun(){const c=runCandidates();if(!c.length)return null;const tot=c.reduce((a,x)=>a+x.w,0);let r=Math.random()*tot;for(const x of c){r-=x.w;if(r<=0)return x}return c[c.length-1]}
+let runPick=null;
+function showDispatch(){
+  const ov=$('#driveov');ov.hidden=false;runPick=pickRun();
+  if(!runPick){ov.innerHTML=`<div class="drivebig"><p>No call addresses within that distance. Widen the range on the Drive tab.</p><button class="btn" id="rcancel">Back</button></div>`;$('#rcancel').onclick=()=>{ov.hidden=true;ov.innerHTML=''};return}
+  const {p,s}=runPick;const cx=crossFor(s,p);const radio=state.settings.radio&&state.settings.audio&&canSpeak;const text=dispatchText(p,s);const me=runPick;
+  ov.innerHTML=`<div class="drivebig"><p class="eyebrow">Practice call</p>
+   <div class="prompt" style="padding:0"><div class="addr ${radio?'radio':''}" id="raddr">${esc(p.a)}</div>${cx?`<div class="sub ${radio?'radio':''}" id="rx" style="font-size:16px">Cross streets ${esc(cx[0])} &amp; ${esc(cx[1])}</div>`:''}</div>
+   <p class="muted">Work out your route, then tap Rolling as you pull out. The clock until Rolling shows how fast you decided.</p>
+   <button class="btn big" id="rroll">Rolling</button>
+   <div class="row wrap"><button class="btn ghost" id="rreplay">Replay</button><button class="btn ghost" id="rother">Different call</button><button class="btn ghost" id="rcancel">Cancel</button></div></div>`;
+  me.t0=Date.now();
+  dispatchSpeak(text,()=>{me.heard=Date.now()},null,()=>runPick!==me||me.rolled);
+  $('#rroll').onclick=()=>{me.rolled=true;try{canSpeak&&speechSynthesis.cancel()}catch(e){}
+    startDrive(false,{a:p.a,k:s.k,x:p.x,y:p.y,r:p.r,sec:p.sec,len:me.len,cx,roll:Date.now()-(me.heard||me.t0)})};
+  $('#rreplay').onclick=()=>speak(text);$('#rother').onclick=()=>{runPick=null;try{canSpeak&&speechSynthesis.cancel()}catch(e){}showDispatch()};
+  $('#rcancel').onclick=()=>{runPick=null;try{canSpeak&&speechSynthesis.cancel()}catch(e){}ov.hidden=true;ov.innerHTML=''};
+}
+function finishRun(sm){
+  const run=sm.run;const r=D.routes[run.r];const exp=r?[...r.pp,[run.x,run.y]]:[[0,0],[run.x,run.y]];
+  const tp=sm.pts.filter(q=>Math.hypot(q[0],q[1])>80&&Math.hypot(q[0]-run.x,q[1]-run.y)>40);
+  const near=q=>{let dd=1e9;for(let i=1;i<exp.length;i++)dd=Math.min(dd,segDist(q[0],q[1],exp[i-1][0],exp[i-1][1],exp[i][0],exp[i][1]));return dd};
+  const overlap=tp.length?tp.filter(q=>near(q)<=35).length/tp.length:0;
+  const extra=run.len?sm.dist/run.len-1:0;
+  let verdict,grade=null,tone='ok';
+  if(!sm.arrived){verdict='Run stopped before arriving';tone='slow'}
+  else if(sm.peeked){verdict='Needed the route this time';grade=1;tone='no'}
+  else if(overlap>=0.75&&extra<=0.15){verdict='Matched the run card';grade=run.roll<=10000?4:3}
+  else if(extra<=0.1){verdict='Different route, about as short';grade=3}
+  else if(extra<=0.35){verdict=`Longer than the run card by ${Math.round(extra*100)}%`;grade=2;tone='slow'}
+  else{verdict=`Much longer than the run card (+${Math.round(extra*100)}%)`;grade=1;tone='no'}
+  if(grade){const id=`w:${run.k}:${run.sec}`;const it=ITEM[id]||ITEMS.find(i=>i.type==='w'&&i.k===run.k);if(it)review(it.id,grade,run.roll)}
+  state.runs.push({t:sm.t,a:run.a,k:run.k,ms:Math.round(sm.ms),dist:Math.round(sm.dist),exp:Math.round(run.len),ov:Math.round(overlap*100),roll:Math.round(run.roll),arr:sm.arrived,peek:sm.peeked,v:verdict});
+  if(state.runs.length>100)state.runs.shift();save();flushDb();
+  const ov=$('#driveov');ov.hidden=false;
+  ov.innerHTML=`<div class="view" style="position:relative;inset:auto;overflow:visible"><div class="stack">
+   <div><p class="eyebrow">Practice call review</p><div class="verdict ${tone}" style="font-size:24px">${esc(verdict)}</div><p class="muted" style="margin-top:4px">${esc(run.a)}</p></div>
+   <div class="statgrid"><div><b>${fmtDur(sm.ms)}</b><span>drive time</span></div><div><b>${(sm.dist/1609.34).toFixed(1)}</b><span>miles you drove (run card ${(run.len/1609.34).toFixed(1)})</span></div><div><b>${sm.arrived?Math.round(overlap*100)+'%':'–'}</b><span>of your route on the run card</span></div></div>
+   <p class="muted" style="font-size:13.5px;margin:0">Time to roll: <b>${fmtMs(run.roll)}</b> from the end of the first readout.</p>
+   <div class="drillmap" id="runmap" style="border:1px solid var(--line);border-radius:var(--r);overflow:hidden"></div>
+   <div class="legend"><span style="--c:var(--amber)">Your route</span><span style="--c:var(--accent)">Run card</span></div>
+   <div class="card"><p class="eyebrow">Run card</p>${pathHtml(run.sec)}${turnsHtml(run.r)}</div>
+   <button class="btn big" id="ranother">Another practice call</button><button class="btn ghost" id="rdone">Done</button></div></div>`;
+  const map=makeMap($('#runmap',ov),{});map.setSectors(false);map.setLabels('auto');map.route(run.r);if(r){const e=r.pp[r.pp.length-1];if(Math.hypot(e[0]-run.x,e[1]-run.y)>30)map.line(e,[run.x,run.y])}map.track(sm.pts);map.pt(run.x,run.y,'tgtpt',10);
+  requestAnimationFrame(()=>{const xs=[0,run.x,...sm.pts.map(p=>p[0])],ys=[0,run.y,...sm.pts.map(p=>p[1])];map.fit([Math.min(...xs),Math.min(...ys),Math.max(...xs),Math.max(...ys)],0.1)});
+  $('#ranother',ov).onclick=()=>showDispatch();$('#rdone',ov).onclick=()=>{ov.hidden=true;ov.innerHTML='';show('log')};
+}
 function driveSection(){
-  const cs=coverageStats();const plan=drivePlan();let pending=null;try{pending=JSON.parse(localStorage.getItem(DKEY)||'null')}catch(e){}
-  return `<div><p class="eyebrow">Drive the district</p><h2>Drive mode</h2><p class="muted">On your own time, in your own vehicle. The app records which streets you drive, then quizzes you on them after you park.</p></div>
+  const cs=coverageStats();let pending=null;try{pending=JSON.parse(localStorage.getItem(DKEY)||'null')}catch(e){}
+  const runs=(state.runs||[]).slice(-5).reverse();
+  return `<div><p class="eyebrow">Before shift</p><h2>Practice calls</h2><p class="muted">In your own vehicle. You get a real Station 8 call address, read the way dispatch reads it. Drive there your way; afterward you see your route against the run card.</p></div>
    ${pending&&pending.active?`<div class="card"><p class="eyebrow">Unfinished drive</p><p>A drive was still recording when the app closed.</p><div class="row wrap"><button class="btn" id="dresume">Keep recording</button><button class="btn ghost" id="dfinish">Finish and review</button></div></div>`:''}
-   ${canGPS?`<button class="btn big" id="dstart">Start a drive</button>`:`<div class="note">${PWA?'This browser has no location access.':'Drive mode works in the installed app. Claude’s site blocks GPS for pages like this one.'}</div>`}
-   <div class="card"><p class="eyebrow">Coverage</p><div class="row" style="margin-bottom:6px"><b>${Math.round(cs.calls*100)}% of calls</b><span class="muted">are on streets you've driven</span></div><div class="covbar"><i style="width:${cs.calls*100}%"></i></div><p class="muted" style="font-size:13px;margin:8px 0 0">${Math.round(cs.len*100)}% of the district's street length driven. Turn on <b>Driven</b> on the Map tab to see where.</p></div>
-   <div class="card"><p class="eyebrow">Worth driving next</p>${plan.length?plan.map(s=>`<div class="planrow"><div>${esc(s.n)} <span>· ${esc(SEC[s.sec]?SEC[s.sec].fam:'')}</span></div><span class="mono">${Math.round(100*covFrac(s))}% driven</span></div>`).join('')+`<div class="row" style="margin-top:10px"><button class="btn ghost" id="dplanmap">Show on map</button></div>`:'<p class="muted">Nothing left: you have driven the busy streets you struggle with.</p>'}<p class="muted" style="font-size:12.5px;margin:8px 0 0">Busy streets you haven't driven yet and streets you keep missing come first.</p></div>`;
+   ${canGPS?`<button class="btn big" id="rstart">Get a practice call</button>
+     <div class="row wrap" style="gap:8px"><span class="muted" style="font-size:13px">Keep calls within</span>${[[1,'1 mile'],[2,'2 miles'],[0,'Any distance']].map(([n,l])=>`<button class="chip" data-rm="${n}" aria-pressed="${state.settings.runMax===n}">${l}</button>`).join('')}</div>`
+     :`<div class="note">${PWA?'This browser has no location access.':'Practice calls work in the installed app. Claude’s site blocks GPS for pages like this one.'}</div>`}
+   ${runs.length?`<div class="card"><p class="eyebrow">Recent practice calls</p>${runs.map(r=>`<div class="planrow"><div>${esc(r.a)} <span>· ${esc(r.v)}</span></div><span class="mono">${fmtDur(r.ms)}</span></div>`).join('')}</div>`:''}
+   <div class="card"><p class="eyebrow">Coverage</p><div class="row" style="margin-bottom:6px"><b>${Math.round(cs.calls*100)}% of calls</b><span class="muted">are on streets you've driven</span></div><div class="covbar"><i style="width:${cs.calls*100}%"></i></div><p class="muted" style="font-size:13px;margin:8px 0 0">${Math.round(cs.len*100)}% of the district's street length driven, counting practice calls. Turn on <b>Driven</b> on the Map tab to see where.</p>${canGPS?`<div class="row" style="margin-top:10px"><button class="btn ghost" id="dstart">Just record a drive</button></div>`:''}</div>`;
 }
 /* ---------- Call log ---------- */
 let logConf=3;
@@ -920,7 +1009,8 @@ function renderLog(){
     save();renderLog();$('#lmsg').textContent=`Saved. ${entry.conf<=3||entry.hes||entry.miss?esc(s.n)+' moved to the front of your next session.':''}`};
   $$('.logitem button',v).forEach(b=>b.onclick=()=>{state.log=state.log.filter(l=>String(l.t)!==b.dataset.t);save();renderLog()});
   const ds=$('#dstart',v);if(ds)ds.onclick=()=>startDrive(false);
-  const dp=$('#dplanmap',v);if(dp)dp.onclick=()=>{mapFocus={plan:drivePlan().map(s=>s.k)};show('map')};
+  const rs2=$('#rstart',v);if(rs2)rs2.onclick=()=>showDispatch();
+  $$('[data-rm]',v).forEach(b=>b.onclick=()=>{state.settings.runMax=+b.dataset.rm;save();renderLog()});
   const dr=$('#dresume',v);if(dr)dr.onclick=()=>{try{drv=JSON.parse(localStorage.getItem(DKEY))}catch(e){}if(drv)startDrive(true)};
   const df=$('#dfinish',v);if(df)df.onclick=()=>{try{drv=JSON.parse(localStorage.getItem(DKEY))}catch(e){}stopDrive()};
 }
@@ -929,7 +1019,7 @@ show('train');
 fixState();
 let dbTries=0;(function tryDb(){if(window.claude&&window.claude.use){connectDb();return}if(++dbTries<12)setTimeout(tryDb,500)})();
 if(PWA){syncMsg='Saved on this phone';renderTop();if('serviceWorker' in navigator)navigator.serviceWorker.register('sw.js').catch(()=>{});try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}}
-window.__fd8={ITEMS,SEC,ST,D,getState:()=>state,setS:v=>{S=v},openDrill,next,startSessionFor,simulateFix:(lon,lat,acc)=>onFix({coords:{longitude:lon,latitude:lat,accuracy:acc||8}}),matchWhich,matchOption};
+window.__fd8={ITEMS,SEC,ST,D,getState:()=>state,showDispatch,getRun:()=>runPick,dispatchText,setS:v=>{S=v},openDrill,next,startSessionFor,simulateFix:(lon,lat,acc)=>onFix({coords:{longitude:lon,latitude:lat,accuracy:acc||8}}),matchWhich,matchOption};
 })();
 </script>
 </body></html>
